@@ -44,7 +44,7 @@ def probe_res(video):
     return wid, hei
 
 
-def resize_move(tmp_video, resized_video, shortside=256):
+def resize_move(tmp_video, resized_video, start, end, shortside=256):
     wid, hei = probe_res(tmp_video)
 
     if (wid > shortside) and (hei > shortside):
@@ -62,12 +62,23 @@ def resize_move(tmp_video, resized_video, shortside=256):
                    "-loglevel",  "quiet",
                    "-i", tmp_video,
                    "-vf", "scale={}x{}".format(wid_new, hei_new),
+                   "-ss", start,
+                   "-to", end,
                    "-c:a", "copy",
                    resized_video]
         subprocess.call(command)
         os.remove(tmp_video)
     else:
-        shutil.move(tmp_video, resized_video)
+        command = ["ffmpeg",
+                   "-y",
+                   "-loglevel", "quiet",
+                   "-i", tmp_video,
+                   "-ss", start,
+                   "-to", end,
+                   "-c:a", "copy",
+                   resized_video]
+        subprocess.call(command)
+        os.remove(tmp_video)
 
 
 def process_missing(video, args):
@@ -81,12 +92,12 @@ def process_missing(video, args):
     except Exception as e:
         print("Error processing {} file with error {}".format(url, e))
 
+
 def process(video, args):
-    vid, classname = video
-    basename = 'v_{}.mp4'.format(vid)
+    vid, classname, start, end, label = video
+    basename = 'v_{}_{}_{}.mp4'.format(vid, start, label)
     folder = os.path.join(args.root_dir, classname)
-    if not os.path.isdir(folder):
-        os.mkdir(folder)
+    os.makedirs(folder, exist_ok=True)
     tmp_video = os.path.join(args.tmp_dir, basename)
     resized_video = os.path.join(folder, basename)
     if os.path.exists(resized_video):
@@ -94,7 +105,7 @@ def process(video, args):
 
     try:
         download_to_tmp(vid, tmp_video)
-        resize_move(tmp_video, resized_video, args.shortside)
+        resize_move(tmp_video, resized_video, start, end, args.shortside)
         print('Processed [{}/{}]'.format(classname, vid))
     except Exception as e:
         print('Error processing [{}/{}]: {}'.format(classname, vid, e))
@@ -104,7 +115,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--root_dir', required=True)
     parser.add_argument('--tmp_dir', default='/tmp/HACS')
-    parser.add_argument('--dataset', default='all', choices=['all', 'segments', 'missing'])
+    parser.add_argument('--dataset', default='all',
+                        choices=['all', 'segments', 'missing'])
+    parser.add_argument('--annotation_file', default=None, type=str)
     parser.add_argument('--shortside', default=256, type=int)
     parser.add_argument('--num_worker', default=16, type=int)
     parser.add_argument('--seed', default=123, type=int)
@@ -113,15 +126,13 @@ if __name__ == "__main__":
     random.seed(args.seed)
 
     # make dataset dirs
-    if not os.path.isdir(args.root_dir):
-        os.mkdir(args.root_dir)
-    if not os.path.isdir(args.tmp_dir):
-        os.mkdir(args.tmp_dir)
+    os.makedirs(args.root_dir, exist_ok=True)
+    os.makedirs(args.tmp_dir, exist_ok=True)
 
     # parse annotation file
     videos = set()
     if args.dataset == 'all':
-        annotation_file = 'HACS_v1.1.1/HACS_clips_v1.1.1.csv'
+        annotation_file = args.annotation_file
         with open(annotation_file, 'r') as f:
             reader = csv.reader(f, delimiter=',')
             next(reader)
@@ -130,7 +141,7 @@ if __name__ == "__main__":
                 if subset == 'testing':
                     continue
                 classname = classname.replace(' ', '_')
-                videos.add((vid, classname))
+                videos.add((vid, classname, start, end, label))
 
     elif args.dataset == 'segments':
         annotation_file = 'HACS_v1.1.1/HACS_segments_v1.1.1.json'
